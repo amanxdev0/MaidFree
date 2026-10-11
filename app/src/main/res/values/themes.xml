@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MaidFree" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorPrimary">#FFB35C</item>
+        <item name="android:colorPrimaryDark">#0E0F13</item>
+        <item name="android:colorAccent">#FFB35C</item>
+        <item name="android:windowBackground">#0E0F13</item>
+        <item name="android:textColorPrimary">#F2F2F2</item>
+        <item name="android:textColorSecondary">#B8B8B8</item>
+    </style>
+</resources>
