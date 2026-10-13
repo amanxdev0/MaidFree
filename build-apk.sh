@@ -12,6 +12,25 @@ KOTLINC=~/toolchain/kotlin/kotlinc/bin/kotlinc
 STDLIB=~/toolchain/kotlin/kotlinc/lib/kotlin-stdlib.jar
 SRC=~/workspace/maidfree/app/src/main
 OUT=~/workspace/maidfree/build-out
+# Shizuku API (dev.rikka.shizuku:api:12.2.0 + provider:12.2.0, MIT license)
+# Jars are fetched from Maven Central on first build and cached in libs/.
+SHIZUKU_JARS=~/workspace/maidfree/libs/shizuku-api.jar:~/workspace/maidfree/libs/shizuku-provider.jar
+fetch_shizuku() {
+  local ver=12.2.0 base=https://repo1.maven.org/maven2/dev/rikka/shizuku
+  local libdir=~/workspace/maidfree/libs
+  mkdir -p "$libdir"
+  for art in "api:shizuku-api" "provider:shizuku-provider"; do
+    local mod="${art%%:*}" jar="${art##*:}.jar"
+    if [ ! -f "$libdir/$jar" ]; then
+      echo "-- fetching $mod $ver --"
+      curl -sL -o "$libdir/$mod.aar" "$base/$mod/$ver/$mod-$ver.aar"
+      unzip -o -q "$libdir/$mod.aar" -d "$libdir/$mod-tmp" "classes.jar"
+      mv "$libdir/$mod-tmp/classes.jar" "$libdir/$jar"
+      rm -rf "$libdir/$mod-tmp" "$libdir/$mod.aar"
+    fi
+  done
+}
+fetch_shizuku
 
 rm -rf "$OUT"
 mkdir -p "$OUT/gen" "$OUT/classes" "$OUT/dex"
@@ -28,11 +47,11 @@ echo "== 2. aapt2 link =="
 echo "== 3. kotlinc =="
 find "$SRC/java" -name "*.kt" > "$OUT/sources.txt"
 find "$OUT/gen" -name "*.java" >> "$OUT/sources.txt"
-"$KOTLINC" @"$OUT/sources.txt" -classpath "$AJAR" -d "$OUT/classes" -jvm-target 17 -nowarn
+"$KOTLINC" @"$OUT/sources.txt" -classpath "$AJAR:$SHIZUKU_JARS" -d "$OUT/classes" -jvm-target 17 -nowarn
 
 echo "== 4. d8 =="
 (cd "$OUT/classes" && "$JAVA_HOME/bin/jar" cf "$OUT/classes.jar" .)
-"$BT/d8" --lib "$AJAR" --min-api 26 --output "$OUT/dex" "$OUT/classes.jar" "$STDLIB"
+"$BT/d8" --lib "$AJAR" --min-api 26 --output "$OUT/dex" "$OUT/classes.jar" "$STDLIB" ~/workspace/maidfree/libs/shizuku-api.jar ~/workspace/maidfree/libs/shizuku-provider.jar
 
 echo "== 5. add classes.dex =="
 cp "$OUT/base.apk" "$OUT/app-unsigned.apk"
@@ -50,6 +69,7 @@ if [ ! -f "$KS" ]; then
     -dname "CN=MaidFree Debug, OU=Dev, O=Sweep, L=Delhi, C=IN" -noprompt
 fi
 "$BT/apksigner" sign --ks "$KS" --ks-pass pass:android \
+  --v1-signing-enabled true --v2-signing-enabled true \
   --out "$OUT/maidfree.apk" "$OUT/app-aligned.apk"
 
 echo "== 8. verify =="

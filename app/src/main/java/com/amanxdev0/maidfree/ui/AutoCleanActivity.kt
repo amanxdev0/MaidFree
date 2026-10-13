@@ -19,9 +19,11 @@ import android.widget.TextView
 import android.widget.Toast
 import com.amanxdev0.maidfree.R
 import com.amanxdev0.maidfree.clean.AutoCleanService
+import com.amanxdev0.maidfree.clean.ShizukuCleaner
 import com.amanxdev0.maidfree.model.CleanableItem
 import com.amanxdev0.maidfree.scan.Scanner
 import com.amanxdev0.maidfree.util.formatBytes
+import rikka.shizuku.Shizuku
 
 /**
  * Automatic cache cleaner: ticks through the selected apps, opens each one's
@@ -38,6 +40,23 @@ class AutoCleanActivity : Activity() {
     private lateinit var totalText: TextView
     private lateinit var cleanBtn: Button
     private lateinit var scheduleCheck: CheckBox
+
+    private lateinit var shizukuStatus: TextView
+    private lateinit var btnShizukuClean: Button
+    private lateinit var btnShizukuPerm: Button
+    private lateinit var btnShizukuInstall: Button
+
+    private val shizukuBinderListener = Shizuku.OnBinderReceivedListener { refreshShizuku() }
+    private val shizukuDeadListener = Shizuku.OnBinderDeadListener { refreshShizuku() }
+    private val shizukuPermListener =
+        Shizuku.OnRequestPermissionResultListener { _, grantResult ->
+            runOnUiThread {
+                if (grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    Toast.makeText(this, "Shizuku permission granted", Toast.LENGTH_SHORT).show()
+                }
+                refreshShizuku()
+            }
+        }
 
     private val items = mutableListOf<CleanableItem>()
     private lateinit var adapter: CacheAdapter
@@ -77,6 +96,19 @@ class AutoCleanActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) {
             findViewById<TextView>(R.id.restrictedNote).visibility = View.VISIBLE
         }
+
+        shizukuStatus = findViewById(R.id.shizukuStatus)
+        btnShizukuClean = findViewById(R.id.btnShizukuClean)
+        btnShizukuPerm = findViewById(R.id.btnShizukuPerm)
+        btnShizukuInstall = findViewById(R.id.btnShizukuInstall)
+
+        btnShizukuClean.setOnClickListener { confirmShizukuClean() }
+        btnShizukuPerm.setOnClickListener { ShizukuCleaner.requestPermission() }
+        btnShizukuInstall.setOnClickListener { openShizukuStore() }
+
+        Shizuku.addBinderReceivedListener(shizukuBinderListener)
+        Shizuku.addBinderDeadListener(shizukuDeadListener)
+        Shizuku.addRequestPermissionResultListener(shizukuPermListener)
     }
 
     override fun onResume() {
@@ -85,6 +117,97 @@ class AutoCleanActivity : Activity() {
         setupBox.visibility = if (enabled) View.GONE else View.VISIBLE
         mainBox.visibility = if (enabled) View.VISIBLE else View.GONE
         if (enabled) loadCaches()
+        refreshShizuku()
+    }
+
+    override fun onDestroy() {
+        AutoCleanService.onProgress = null
+        try {
+            Shizuku.removeBinderReceivedListener(shizukuBinderListener)
+            Shizuku.removeBinderDeadListener(shizukuDeadListener)
+            Shizuku.removeRequestPermissionResultListener(shizukuPermListener)
+        } catch (e: Exception) { /* ignore */ }
+        super.onDestroy()
+    }
+
+    // ---------- Shizuku ----------
+
+    private fun refreshShizuku() {
+        runOnUiThread {
+            val installed = ShizukuCleaner.isManagerInstalled(this)
+            val alive = ShizukuCleaner.isBinderAlive()
+            val granted = ShizukuCleaner.hasPermission()
+            btnShizukuInstall.visibility = if (!installed) View.VISIBLE else View.GONE
+            btnShizukuPerm.visibility =
+                if (installed && alive && !granted) View.VISIBLE else View.GONE
+            btnShizukuClean.visibility =
+                if (installed && alive && granted) View.VISIBLE else View.GONE
+            shizukuStatus.text = when {
+                !installed -> "Shizuku app isn't installed. Install it, start it via wireless debugging, then come back."
+                !alive -> "Shizuku is installed but not running. Open the Shizuku app and start it, then come back."
+                !granted -> "Shizuku is running. Grant MaidFree permission to enable one-tap cleaning."
+                else -> "Shizuku is ready — one tap clears every app's cache at once."
+            }
+        }
+    }
+
+    private fun openShizukuStore() {
+        try {
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    android.net.Uri.parse("market://details?id=moe.shizuku.privileged.api")
+                )
+            )
+        } catch (e: Exception) {
+            Toast.makeText(
+                this,
+                "Search 'Shizuku' on the Play Store or GitHub (RikkaApps/Shizuku)",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun confirmShizukuClean() {
+        AlertDialog.Builder(this)
+            .setTitle("Clear all app caches?")
+            .setMessage(
+                "Shizuku will ask Android to trim every app's cache at once. " +
+                    "This is the fast privileged clean — no per-app tapping."
+            )
+            .setPositiveButton("Clean") { _, _ -> runShizukuClean() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun runShizukuClean() {
+        btnShizukuClean.isEnabled = false
+        shizukuStatus.text = "Clearing caches…"
+        Thread {
+            val before = try {
+                Scanner.scanAppCaches(this@AutoCleanActivity).sumOf { it.size }
+            } catch (e: Exception) { 0L }
+            val (code, out) = ShizukuCleaner.clearAllCaches()
+            val after = try {
+                // give the system a moment to settle, then re-measure
+                Thread.sleep(1500)
+                Scanner.scanAppCaches(this@AutoCleanActivity).sumOf { it.size }
+            } catch (e: Exception) { before }
+            val freed = (before - after).coerceAtLeast(0L)
+            runOnUiThread {
+                btnShizukuClean.isEnabled = true
+                if (code == 0) {
+                    shizukuStatus.text = "Done — freed about ${formatBytes(freed)} of cache."
+                    Toast.makeText(
+                        this, "Cleared ${formatBytes(freed)}", Toast.LENGTH_LONG
+                    ).show()
+                    loadCaches()
+                } else {
+                    shizukuStatus.text = "Clean failed (exit $code). ${out.take(120)}"
+                }
+                refreshShizuku()
+            }
+        }.start()
     }
 
     private fun loadCaches() {
@@ -155,11 +278,6 @@ class AutoCleanActivity : Activity() {
         }
         status.text = "Starting… keep the screen on"
         svc.begin(pkgs)
-    }
-
-    override fun onDestroy() {
-        AutoCleanService.onProgress = null
-        super.onDestroy()
     }
 }
 
