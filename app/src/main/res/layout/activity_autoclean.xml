@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Auto-clean caches"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Opens each app's settings and taps Clear cache for you"
+        android:textSize="13sp"
+        android:alpha="0.55"
+        android:layout_marginBottom="16dp" />
+
+    <!-- Setup prompt when the accessibility service is off -->
+    <LinearLayout
+        android:id="@+id/setupBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/glass_card"
+        android:padding="18dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="One-time setup"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="MaidFree needs its accessibility service turned on to tap Clear cache automatically. It only interacts with app settings screens."
+            android:textSize="13sp"
+            android:alpha="0.7"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:id="@+id/restrictedNote"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:text="Android 13+: first open MaidFree's App info, tap ⋮ and allow “Restricted settings”, or the toggle below won't appear."
+            android:textSize="12sp"
+            android:alpha="0.7"
+            android:layout_marginBottom="6dp" />
+
+        <Button
+            android:id="@+id/btnEnableAccess"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Open accessibility settings" />
+    </LinearLayout>
+
+    <!-- Main UI when the service is on -->
+    <LinearLayout
+        android:id="@+id/mainBox"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/glass_card"
+            android:padding="16dp"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:id="@+id/cleanStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Measuring…"
+                android:textSize="14sp" />
+
+            <ProgressBar
+                android:id="@+id/cleanProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/cleanTotal"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textSize="12sp"
+                android:alpha="0.55" />
+        </LinearLayout>
+
+        <ListView
+            android:id="@+id/cacheList"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="#14FFFFFF"
+            android:dividerHeight="1dp" />
+
+        <CheckBox
+            android:id="@+id/scheduleCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Also auto-clean on the daily schedule"
+            android:textSize="13sp"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/cleanBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Clean selected caches" />
+    </LinearLayout>
+</LinearLayout>

@@ -9,6 +9,7 @@ import android.os.StatFs
 import android.os.storage.StorageManager
 import com.amanxdev0.maidfree.model.AppInfo
 import com.amanxdev0.maidfree.model.CleanableItem
+import com.amanxdev0.maidfree.util.Exclusions
 import com.amanxdev0.maidfree.util.Perms
 import java.io.File
 import java.security.MessageDigest
@@ -22,7 +23,17 @@ object Scanner {
     /** Set true to abort an in-progress scan. Reset to false before starting. */
     @Volatile var cancelRequested = false
 
-    private val TEMP_EXT = setOf("tmp", "temp", "log", "bak", "swp", "chk", "old")
+    private val TEMP_EXT = setOf(
+        "tmp", "temp", "log", "bak", "swp", "chk", "old", "dmp",
+        "crash", "trace", "traces", "err", "stacktrace"
+    )
+    /** Junk by exact filename (case-insensitive). */
+    private val JUNK_NAMES = setOf(".ds_store", "thumbs.db", "desktop.ini")
+    /** Regenerable cache/log directory names flagged anywhere in shared storage. */
+    private val CACHE_DIR_NAMES = setOf(
+        "cache", ".cache", "tmp", ".tmp", "temp", ".temp",
+        "logs", ".logs", "log", "crash", ".crash", "crashlytics"
+    )
     private const val SELF_PKG = "com.amanxdev0.maidfree"
 
     class CancelledException : RuntimeException()
@@ -36,14 +47,17 @@ object Scanner {
     private fun sharedRoot(): File =
         Environment.getExternalStorageDirectory() ?: File("/sdcard")
 
-    /** Walk shared storage, skipping symlinks and our own app dir. Reports progress. */
+    /** Walk shared storage, skipping symlinks, our own app dir and user exclusions. Reports progress. */
     private fun walkShared(
+        ctx: Context,
         onFile: (File) -> Unit,
+        onDir: ((File) -> Unit)? = null,
         onProgress: (scanned: Int) -> Unit
     ) {
         var count = 0
         val root = sharedRoot()
         if (!root.exists()) return
+        val excluded = Exclusions.get(ctx)
         val stack = ArrayDeque<File>()
         stack.add(root)
         while (stack.isNotEmpty()) {
@@ -55,8 +69,10 @@ object Scanner {
                 try {
                     if (java.nio.file.Files.isSymbolicLink(k.toPath())) continue
                 } catch (e: Exception) { /* ignore */ }
+                if (Exclusions.isExcluded(k.absolutePath, excluded)) continue
                 if (k.isDirectory) {
                     if (k.name == SELF_PKG) continue
+                    onDir?.invoke(k)
                     stack.add(k)
                 } else {
                     count++
@@ -85,20 +101,39 @@ object Scanner {
 
     fun scanJunk(ctx: Context, onProgress: (Int) -> Unit): List<CleanableItem> {
         val out = mutableListOf<CleanableItem>()
+        val excluded = Exclusions.get(ctx)
         // 1a. App caches (needs usage access)
         out += scanAppCaches(ctx)
-        // 1b. Temp / log / backup files
-        walkShared(onFile = { f ->
+        // 1b. Temp / log / backup files + known junk filenames
+        walkShared(ctx, onFile = { f ->
             val ext = f.extension.lowercase()
             val name = f.name.lowercase()
-            if (ext in TEMP_EXT || name.endsWith("~")) {
+            if (ext in TEMP_EXT || name.endsWith("~") || name in JUNK_NAMES) {
                 out += CleanableItem(
                     f.absolutePath, f.name, f.length(),
                     "Temp files", "Leftover temporary file"
                 )
             }
         }, onProgress = onProgress)
-        // 1c. Strictly-empty directories only (kids.isEmpty()).
+        // 1c. Regenerable cache/log directories anywhere in shared storage
+        // (skips Android/data & Android/obb — the OS walls those off anyway).
+        walkShared(ctx, onFile = {}, onDir = { d ->
+            val n = d.name.lowercase()
+            if (n in CACHE_DIR_NAMES && d.name != SELF_PKG &&
+                !d.absolutePath.contains("/Android/data/") &&
+                !d.absolutePath.contains("/Android/obb/")
+            ) {
+                var total = 0L
+                try {
+                    d.walkTopDown().forEach { if (it.isFile) total += it.length() }
+                } catch (e: Exception) { /* ignore */ }
+                if (total > 0) out += CleanableItem(
+                    d.absolutePath, d.name, total,
+                    "Cache folders", "Regenerable cache data"
+                )
+            }
+        }, onProgress = {})
+        // 1d. Strictly-empty directories only (kids.isEmpty()).
         // Never flag a dir that merely contains subdirs — it may hold real data.
         run {
             val root = sharedRoot()
@@ -106,6 +141,7 @@ object Scanner {
             while (stack.isNotEmpty()) {
                 checkCancel()
                 val dir = stack.removeLast()
+                if (Exclusions.isExcluded(dir.absolutePath, excluded)) continue
                 val kids = try { dir.listFiles() } catch (e: Exception) { null } ?: continue
                 for (k in kids) if (k.isDirectory) stack.add(k)
                 if (kids.isEmpty() && dir != root) {
@@ -116,19 +152,21 @@ object Scanner {
                 }
             }
         }
-        // 1d. Thumbnail caches
+        // 1e. Thumbnail caches (any .thumbnails dir, not just DCIM)
         run {
-            val thumbs = File(sharedRoot(), "DCIM/.thumbnails")
-            if (thumbs.isDirectory) {
-                var total = 0L
-                try {
-                    thumbs.walkTopDown().forEach { if (it.isFile) total += it.length() }
-                } catch (e: Exception) { /* ignore */ }
-                if (total > 0) out += CleanableItem(
-                    thumbs.absolutePath, ".thumbnails", total,
-                    "Thumbnails", "Regenerable thumbnail cache"
-                )
-            }
+            val seen = HashSet<String>()
+            walkShared(ctx, onFile = {}, onDir = { d ->
+                if (d.name.lowercase() == ".thumbnails" && seen.add(d.absolutePath)) {
+                    var total = 0L
+                    try {
+                        d.walkTopDown().forEach { if (it.isFile) total += it.length() }
+                    } catch (e: Exception) { /* ignore */ }
+                    if (total > 0) out += CleanableItem(
+                        d.absolutePath, d.name, total,
+                        "Thumbnails", "Regenerable thumbnail cache"
+                    )
+                }
+            }, onProgress = {})
         }
         return out.sortedByDescending { it.size }
     }
@@ -196,9 +234,9 @@ object Scanner {
 
     // ---------- 3. Duplicates ----------
 
-    fun scanDuplicates(onProgress: (Int) -> Unit): List<List<CleanableItem>> {
+    fun scanDuplicates(ctx: Context, onProgress: (Int) -> Unit): List<List<CleanableItem>> {
         val bySize = HashMap<Long, MutableList<File>>()
-        walkShared(onFile = { f ->
+        walkShared(ctx, onFile = { f ->
             val len = try { f.length() } catch (e: Exception) { 0L }
             if (len > 0) bySize.getOrPut(len) { mutableListOf() }.add(f)
         }, onProgress = onProgress)
@@ -231,11 +269,11 @@ object Scanner {
 
     // ---------- 4. Large files ----------
 
-    fun scanLargeFiles(top: Int = 50, onProgress: (Int) -> Unit): List<CleanableItem> {
+    fun scanLargeFiles(ctx: Context, top: Int = 50, onProgress: (Int) -> Unit): List<CleanableItem> {
         val heap = java.util.PriorityQueue<File>(top + 1) { a, b ->
             a.length().compareTo(b.length())
         }
-        walkShared(onFile = { f ->
+        walkShared(ctx, onFile = { f ->
             heap.add(f)
             if (heap.size > top) heap.poll()
         }, onProgress = onProgress)

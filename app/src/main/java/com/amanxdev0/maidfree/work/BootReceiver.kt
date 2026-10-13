@@ -8,7 +8,7 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            val on = ctx.getSharedPreferences("sweep", Context.MODE_PRIVATE)
+            val on = ctx.getSharedPreferences("maidfree", Context.MODE_PRIVATE)
                 .getBoolean("scheduler", false)
             if (on) {
                 AlarmReceiver.createChannel(ctx)

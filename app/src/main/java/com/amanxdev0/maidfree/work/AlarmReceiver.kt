@@ -58,21 +58,70 @@ class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(ctx: Context, intent: Intent) {
         val done = goAsync()
-        Thread {
-            try {
-                Scanner.cancelRequested = false
-                val junk = Scanner.scanJunk(ctx) {}
-                val total = junk.filter { it.category != "App cache" }.sumOf { it.size }
-                if (total > 50L * 1024 * 1024) notifyFound(ctx, total)
-            } catch (e: Exception) {
-                // quiet: will retry tomorrow
-            } finally {
-                done.finish()
-            }
-        }.start()
+        val prefs = ctx.getSharedPreferences("maidfree", Context.MODE_PRIVATE)
+        // If the user opted into scheduled auto-clean and the accessibility
+        // service is live, clear caches silently instead of just notifying.
+        if (prefs.getBoolean("autoClean", false) &&
+            com.amanxdev0.maidfree.clean.AutoCleanService.isEnabled(ctx)
+        ) {
+            Thread {
+                try {
+                    val pkgs = Scanner.scanAppCaches(ctx).map { it.path }
+                    val svc = com.amanxdev0.maidfree.clean.AutoCleanService.instance
+                    if (svc != null && pkgs.isNotEmpty()) {
+                        com.amanxdev0.maidfree.clean.AutoCleanService.onProgress =
+                            { _, _, _, finished ->
+                                if (finished) {
+                                    notifyDone(ctx)
+                                    com.amanxdev0.maidfree.clean.AutoCleanService.onProgress = null
+                                }
+                            }
+                        svc.begin(pkgs)
+                    } else {
+                        scanAndNotify(ctx)
+                    }
+                } catch (e: Exception) {
+                    // quiet: will retry tomorrow
+                } finally {
+                    done.finish()
+                }
+            }.start()
+        } else {
+            Thread {
+                try {
+                    scanAndNotify(ctx)
+                } catch (e: Exception) {
+                    // quiet: will retry tomorrow
+                } finally {
+                    done.finish()
+                }
+            }.start()
+        }
+    }
+
+    private fun scanAndNotify(ctx: Context) {
+        Scanner.cancelRequested = false
+        val junk = Scanner.scanJunk(ctx) {}
+        val total = junk.filter { it.category != "App cache" }.sumOf { it.size }
+        if (total > 50L * 1024 * 1024) notifyFound(ctx, total)
+    }
+
+    private fun notifyDone(ctx: Context) {
+        postNotification(
+            ctx, "Auto-clean finished",
+            "App caches were cleared automatically."
+        )
     }
 
     private fun notifyFound(ctx: Context, bytes: Long) {
+        postNotification(
+            ctx,
+            "${formatBytes(bytes)} of junk found",
+            "Tap to clean it up with MaidFree."
+        )
+    }
+
+    private fun postNotification(ctx: Context, title: String, text: String) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
                 android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -90,8 +139,8 @@ class AlarmReceiver : BroadcastReceiver() {
             @Suppress("DEPRECATION")
             Notification.Builder(ctx)
         }.setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("🧹 ${formatBytes(bytes)} of junk found")
-            .setContentText("Tap to clean it up with Sweep.")
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(pi)
             .setAutoCancel(true)
             .build()

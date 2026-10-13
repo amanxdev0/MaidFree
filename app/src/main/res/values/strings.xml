@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">MaidFree</string>
+    <string name="auto_clean_accessibility_desc">MaidFree uses this to automatically tap “Clear cache” inside system app-settings screens. It never reads other screen content and never touches “Clear data”.</string>
 </resources>

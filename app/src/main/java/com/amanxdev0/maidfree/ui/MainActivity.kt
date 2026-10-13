@@ -6,10 +6,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
-import android.widget.GridLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Switch
@@ -27,19 +28,20 @@ class MainActivity : Activity() {
     private lateinit var storageText: TextView
     private lateinit var storageBar: ProgressBar
     private lateinit var storageBreakdown: TextView
-    private lateinit var toolsGrid: GridLayout
+    private lateinit var toolsList: LinearLayout
     private lateinit var schedulerSwitch: Switch
 
-    private val prefs by lazy { getSharedPreferences("sweep", MODE_PRIVATE) }
+    private val prefs by lazy { getSharedPreferences("maidfree", MODE_PRIVATE) }
 
-    data class Tool(val emoji: String, val title: String, val desc: String, val type: String)
+    data class Tool(val icon: Int, val title: String, val desc: String, val type: String)
 
     private val tools = listOf(
-        Tool("🧹", "Junk cleaner", "App caches, temp files, empty folders", "junk"),
-        Tool("💀", "Corpse finder", "Leftovers from uninstalled apps", "corpse"),
-        Tool("👯", "Duplicates", "Find identical files wasting space", "duplicates"),
-        Tool("🐘", "Large files", "The biggest space hogs", "large"),
-        Tool("📱", "App manager", "Per-app sizes, uninstall, info", "apps"),
+        Tool(R.drawable.ic_tool_autoclean, "Auto-clean caches", "Clears app caches automatically", "autoclean"),
+        Tool(R.drawable.ic_tool_junk, "Junk cleaner", "App caches, temp files, empty folders", "junk"),
+        Tool(R.drawable.ic_tool_corpse, "Corpse finder", "Leftovers from uninstalled apps", "corpse"),
+        Tool(R.drawable.ic_tool_dup, "Duplicates", "Identical files wasting space", "duplicates"),
+        Tool(R.drawable.ic_tool_large, "Large files", "The biggest space hogs", "large"),
+        Tool(R.drawable.ic_tool_apps, "App manager", "Per-app sizes, uninstall, info", "apps"),
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,13 +52,13 @@ class MainActivity : Activity() {
         storageText = findViewById(R.id.storageText)
         storageBar = findViewById(R.id.storageBar)
         storageBreakdown = findViewById(R.id.storageBreakdown)
-        toolsGrid = findViewById(R.id.toolsGrid)
+        toolsList = findViewById(R.id.toolsList)
         schedulerSwitch = findViewById(R.id.schedulerSwitch)
 
         findViewById<Button>(R.id.btnFiles).setOnClickListener { Perms.requestAllFilesAccess(this) }
         findViewById<Button>(R.id.btnUsage).setOnClickListener { Perms.requestUsageAccess(this) }
 
-        buildToolCards()
+        buildToolRows()
 
         schedulerSwitch.isChecked = prefs.getBoolean("scheduler", false)
         schedulerSwitch.setOnCheckedChangeListener { _, on ->
@@ -104,52 +106,72 @@ class MainActivity : Activity() {
                 val pct = if (s.total > 0) (used * 100 / s.total).toInt() else 0
                 runOnUiThread {
                     if (s.total > 0) {
-                        storageText.text = "Storage: ${formatBytes(used)} of ${formatBytes(s.total)} used"
+                        storageText.text = "${formatBytes(used)} of ${formatBytes(s.total)} used"
                         storageBar.progress = pct
-                        storageBreakdown.text = "Free ${formatBytes(s.free)}"
+                        storageBreakdown.text = "${formatBytes(s.free)} free"
                     } else {
-                        storageText.text = "Storage: unavailable"
+                        storageText.text = "Unavailable"
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread { storageText.text = "Storage: unavailable" }
+                runOnUiThread { storageText.text = "Unavailable" }
             }
         }.start()
     }
 
-    private fun buildToolCards() {
-        toolsGrid.removeAllViews()
-        for (t in tools) {
-            val card = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER
-                setPadding(24, 28, 24, 28)
-                setBackgroundResource(R.drawable.card_bg)
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun buildToolRows() {
+        toolsList.removeAllViews()
+        val tv = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, tv, true)
+        tools.forEachIndexed { i, t ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(16), dp(13), dp(16), dp(13))
+                setBackgroundResource(tv.resourceId)
                 isClickable = true
                 isFocusable = true
             }
-            val emoji = TextView(this).apply { text = t.emoji; textSize = 34f; gravity = Gravity.CENTER }
-            val title = TextView(this).apply {
-                text = t.title; textSize = 16f; gravity = Gravity.CENTER
-                setTypeface(null, android.graphics.Typeface.BOLD)
+            val icon = ImageView(this).apply {
+                setImageResource(t.icon)
+                layoutParams = LinearLayout.LayoutParams(dp(40), dp(40)).apply {
+                    marginEnd = dp(14)
+                }
+                setPadding(dp(8), dp(8), dp(8), dp(8))
             }
-            val desc = TextView(this).apply {
-                text = t.desc; textSize = 12f; gravity = Gravity.CENTER; alpha = 0.6f
+            val texts = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            card.addView(emoji); card.addView(title); card.addView(desc)
-            val lp = GridLayout.LayoutParams().apply {
-                width = 0; height = GridLayout.LayoutParams.WRAP_CONTENT
-                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-                setMargins(8, 8, 8, 8)
+            val title = TextView(this).apply { text = t.title; textSize = 15f }
+            val desc = TextView(this).apply { text = t.desc; textSize = 12f; alpha = 0.55f }
+            texts.addView(title); texts.addView(desc)
+            val chev = TextView(this).apply {
+                text = "›"; textSize = 22f; alpha = 0.35f
             }
-            card.layoutParams = lp
-            card.setOnClickListener {
-                if (t.type == "apps") startActivity(Intent(this, AppsActivity::class.java))
-                else startActivity(
-                    Intent(this, ScanActivity::class.java).putExtra(ScanActivity.EXTRA_TYPE, t.type)
-                )
+            row.addView(icon); row.addView(texts); row.addView(chev)
+            row.setOnClickListener {
+                when (t.type) {
+                    "apps" -> startActivity(Intent(this, AppsActivity::class.java))
+                    "autoclean" -> startActivity(Intent(this, AutoCleanActivity::class.java))
+                    else -> startActivity(
+                        Intent(this, ScanActivity::class.java).putExtra(ScanActivity.EXTRA_TYPE, t.type)
+                    )
+                }
             }
-            toolsGrid.addView(card)
+            toolsList.addView(row)
+            if (i < tools.size - 1) {
+                val div = View(this).apply {
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+                    ).apply { marginStart = dp(70) }
+                    setBackgroundColor(0x14FFFFFF)
+                    alpha = 1f
+                }
+                toolsList.addView(div)
+            }
         }
     }
 }

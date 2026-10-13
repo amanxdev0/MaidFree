@@ -69,6 +69,24 @@ class ScanActivity : Activity() {
 
         deleteBtn.setOnClickListener { confirmDelete() }
 
+        // Long-press a result to exclude its path from all future scans.
+        list.setOnItemLongClickListener { _, _, pos, _ ->
+            val item = items.getOrNull(pos) ?: return@setOnItemLongClickListener true
+            AlertDialog.Builder(this)
+                .setTitle("Exclude from scans?")
+                .setMessage("${item.displayName}\n${item.path}\n\nIt won't appear in future scans.")
+                .setPositiveButton("Exclude") { _, _ ->
+                    com.amanxdev0.maidfree.util.Exclusions.add(this, item.path)
+                    items.remove(item)
+                    adapter.notifyDataSetChanged()
+                    updateTotal()
+                    Toast.makeText(this, "Excluded", Toast.LENGTH_SHORT).show()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            true
+        }
+
         startScan()
     }
 
@@ -85,10 +103,10 @@ class ScanActivity : Activity() {
                     "corpse" -> Scanner.scanCorpses(this@ScanActivity) { n ->
                         runOnUiThread { status.text = "Checking app folders… $n" }
                     }
-                    "duplicates" -> Scanner.scanDuplicates { n ->
+                    "duplicates" -> Scanner.scanDuplicates(this@ScanActivity) { n ->
                         runOnUiThread { status.text = "Hashing… $n files" }
                     }.flatten()
-                    "large" -> Scanner.scanLargeFiles { n ->
+                    "large" -> Scanner.scanLargeFiles(this@ScanActivity) { n ->
                         runOnUiThread { status.text = "Measuring… $n files" }
                     }
                     else -> emptyList()
@@ -97,7 +115,7 @@ class ScanActivity : Activity() {
                     items.clear()
                     items.addAll(found)
                     progress.visibility = View.GONE
-                    status.text = if (items.isEmpty()) "✨ Nothing found — already clean!"
+                    status.text = if (items.isEmpty()) "Nothing found — already clean"
                     else "${items.size} items found"
                     adapter.notifyDataSetChanged()
                     updateTotal()
@@ -145,7 +163,7 @@ class ScanActivity : Activity() {
                     items.removeAll(sel.toSet())
                     adapter.notifyDataSetChanged()
                     updateTotal()
-                    status.text = "Deleted $count items · freed ${formatBytes(freed)} 🎉"
+                    status.text = "Deleted $count items · freed ${formatBytes(freed)}"
                     Toast.makeText(this@ScanActivity, "Freed ${formatBytes(freed)}", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
